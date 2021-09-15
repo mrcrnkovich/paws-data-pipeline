@@ -69,6 +69,7 @@ def create_scores(query_date):
         grouped_past_year[('days_since', 'min')]= grouped_past_year[('days_since', 'min')].dt.days
 
         recency_bins.append(grouped_past_year[('days_since', 'min')].max())
+        recency_bins.sort()                                                 # Avoid the 'must be monotonic' error
 
         grouped_past_year['recency_score'] = pd.cut(grouped_past_year[('days_since','min')], bins= recency_bins, labels=recency_labels, include_lowest = True)
         grouped_past_year.rename(columns={('recency_score', ''): 'recency_score'})
