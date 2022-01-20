@@ -247,28 +247,53 @@ def get_animals(matching_id):
 @common_api.route('/api/person/<matching_id>/animal/<animal_id>/events', methods=['GET'])
 @jwt_ops.jwt_required()
 def get_person_animal_events(matching_id, animal_id):
-    result = {}
-    events = []
+    """
+        :param matching_id -> str
+                    Represents an matching ID in the PDP Contacts
+                    table, that is auto generated when the Pipeline
+                    performs the inital matching between data sources.
+        
+        :param animal_id -> str
+                    Represents the animal_id used for ShelterLuv system.
+
+        Returns -> Dict {animal_id : List[Event]}
+                    
+    """
+    animal_url = f"http://shelterluv.com/api/v1/animals/{animal_id}/events"
 
     if not SHELTERLUV_SECRET_TOKEN:
         return jsonify(fake_data('events'))
 
     with engine.connect() as connection:
-        query = text("select * from pdp_contacts where matching_id = :matching_id and source_type = 'shelterluvpeople' and archived_date is null")
-        query_result = connection.execute(query, matching_id=matching_id)
-        rows = [dict(row) for row in query_result]
-        if len(rows) > 0:
-            row = rows[0]
-            shelterluv_id = row["source_id"]
-            animal_url = f"http://shelterluv.com/api/v1/animals/{animal_id}/events"
-            event_details = requests.get(animal_url, headers={"x-api-key": SHELTERLUV_SECRET_TOKEN}).json()
-            for event in event_details["events"]:
-                for record in event["AssociatedRecords"]:
-                    if record["Type"] == "Person" and record["Id"] == shelterluv_id:
-                        events.append(event)
-            result[animal_id] = events
+        query = text(
+            """SELECT source_id
+                FROM pdp_contacts
+                WHERE matching_id = :matching_id
+                    and source_type = 'shelterluvpeople'
+                    and archived_date is null
+                LIMIT 1
+            """
+            )
+        shelterluv_id = connection.execute(query, matching_id = matching_id).scalar()
+ 
+    if not shelterluv_id:
+        return jsonify({animal_id: []})
 
-    return jsonify(result)
+    event_details = requests.get(animal_url,
+            headers={"x-api-key": SHELTERLUV_SECRET_TOKEN}).json()
+
+    # This could be a separate function
+    def attended_event(event):
+        from functools import reduce
+
+        mask_events = map(
+            lambda r: r.get("Type") == "Person" and r.get("Id") == shelterluv_id,
+            event.get("AssociatedRecords")
+            )
+        return reduce(lambda a, v: a or v, mask_events)
+
+    events = filter(attended_event, event_details.get("events"))
+    return jsonify({animal_id: list(events)})
 
 @common_api.route('/api/person/<matching_id>/support', methods=['GET'])
 @jwt_ops.jwt_required()
